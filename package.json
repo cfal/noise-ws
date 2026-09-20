@@ -14,7 +14,9 @@
     "build": "tsc -p tsconfig.build.json",
     "prepack": "bun run build",
     "test": "bun test --max-concurrency=1 --timeout=15000 test",
-    "test:interop": "bun scripts/test-interop.ts"
+    "test:compile": "bun scripts/test-compile.ts",
+    "test:interop": "bun scripts/test-interop.ts",
+    "bench": "bun bench/throughput.ts"
   },
   "devDependencies": { "@types/bun": "1.4.2", "typescript": "6.0.3" }
 }
