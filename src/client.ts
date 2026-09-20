@@ -10,8 +10,11 @@ export interface NoiseClientOptions extends NoiseOptions {
 
 export function connectNoiseWebSocket(address: string | URL, options: NoiseClientOptions): NoiseWebSocket {
   let url: URL;
-  try { url = new URL(address); }
-  catch { throw new TypeError('Invalid encrypted WebSocket URL'); }
+  try {
+    url = new URL(address);
+  } catch {
+    throw new TypeError('Invalid encrypted WebSocket URL');
+  }
   if (!['ws:', 'wss:'].includes(url.protocol) || url.hash || url.username || url.password) {
     throw new TypeError('Expected ws: or wss: without URL credentials or a fragment');
   }
@@ -25,10 +28,19 @@ export function connectNoiseWebSocket(address: string | URL, options: NoiseClien
     signal?.removeEventListener('abort', abort);
     if (socket?.readyState === WebSocket.CONNECTING) socket.terminate();
   });
-  if (signal?.aborted) { connection.fail('CLOSED'); return connection; }
+  if (signal?.aborted) {
+    connection.fail('CLOSED');
+    return connection;
+  }
   try {
     // Pinning can be reconsidered after https://github.com/oven-sh/bun/issues/43635.
-    socket = new WebSocket(url, { perMessageDeflate: false, tls: { ...options.tls, rejectUnauthorized: options.allowUnverifiedTls !== true } });
+    socket = new WebSocket(url, {
+      perMessageDeflate: false,
+      tls: {
+        ...options.tls,
+        rejectUnauthorized: options.allowUnverifiedTls !== true,
+      },
+    });
     socket.binaryType = 'arraybuffer';
     const transport = socket;
     socket.addEventListener('open', () => connection.attach({
@@ -41,12 +53,17 @@ export function connectNoiseWebSocket(address: string | URL, options: NoiseClien
       abort: () => transport.terminate(),
     }));
     socket.addEventListener('message', (event) => {
-      if (event.data instanceof ArrayBuffer || typeof event.data === 'string') connection.receive(event.data);
-      else connection.fail('PROTOCOL_ERROR');
+      if (event.data instanceof ArrayBuffer || typeof event.data === 'string') {
+        connection.receive(event.data);
+      } else {
+        connection.fail('PROTOCOL_ERROR');
+      }
     });
     socket.addEventListener('error', () => connection.fail());
     socket.addEventListener('close', () => connection.fail('TRANSPORT_CLOSED'));
     signal?.addEventListener('abort', abort, { once: true });
-  } catch { connection.fail(); }
+  } catch {
+    connection.fail();
+  }
   return connection;
 }

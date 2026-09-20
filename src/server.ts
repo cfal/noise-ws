@@ -31,7 +31,9 @@ export function createNoiseServer(options: NoiseServerOptions = {}) {
       socket.binaryType = 'nodebuffer';
       socket.data.connection.attach({
         get bufferedAmount() { return socket.getBufferedAmount(); },
-        write(frame) { if (socket.send(frame, false) === 0) throw new Error('Socket dropped frame'); },
+        write(frame) {
+          if (socket.send(frame, false) === 0) throw new Error('Socket dropped frame');
+        },
         close: () => socket.close(1000),
         abort: () => socket.terminate(),
       });
@@ -43,14 +45,24 @@ export function createNoiseServer(options: NoiseServerOptions = {}) {
   return {
     websocket,
     get size(): number { return connections.size; },
-    upgrade(request: Request, server: Pick<Bun.Server<NoiseSocketData>, 'upgrade'>, connectionOptions: NoiseOptions): Response | undefined {
+    upgrade(
+      request: Request,
+      server: Pick<Bun.Server<NoiseSocketData>, 'upgrade'>,
+      connectionOptions: NoiseOptions,
+    ): Response | undefined {
       const pending = [...connections].filter((connection) => connection.readyState !== 'open').length;
-      if (disposed || connections.size >= maxConnections || pending >= maxPending) return new Response(null, { status: 503 });
-      const connection = new NoiseConnection(false, connectionOptions, () => { connections.delete(connection); });
+      if (disposed || connections.size >= maxConnections || pending >= maxPending) {
+        return new Response(null, { status: 503 });
+      }
+      const connection = new NoiseConnection(false, connectionOptions, () => {
+        connections.delete(connection);
+      });
       connections.add(connection);
       try {
         if (server.upgrade(request, { data: { kind: 'noise-ws', connection } })) return;
-      } catch { /* Failed upgrades release their admission and copied credentials. */ }
+      } catch {
+        // Failed upgrades release their admission and copied credentials.
+      }
       connection.fail('TRANSPORT_ERROR');
       return new Response(null, { status: 400 });
     },

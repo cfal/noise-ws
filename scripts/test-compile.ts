@@ -8,15 +8,17 @@ await mkdir(temporary, { recursive: true });
 const root = await mkdtemp(join(temporary, 'noise-ws-compile-'));
 
 async function run(command: string[], cwd: string): Promise<void> {
-  const process = Bun.spawn(command, { cwd, stdout: 'pipe', stderr: 'pipe' });
-  const stdout = new Response(process.stdout).text();
-  const stderr = new Response(process.stderr).text();
-  const timer = setTimeout(() => process.kill(), 120_000);
+  const child = Bun.spawn(command, { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const stdout = new Response(child.stdout).text();
+  const stderr = new Response(child.stderr).text();
+  const timer = setTimeout(() => child.kill(), 120_000);
   try {
-    const code = await process.exited;
+    const code = await child.exited;
     const output = (await stdout) + (await stderr);
     if (code !== 0) throw new Error(`Smoke subprocess exited ${code}:\n${output}`);
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 try {
@@ -28,13 +30,22 @@ try {
   await mkdir(consumer);
   await mkdir(runtime);
   await writeFile(join(consumer, 'package.json'), JSON.stringify({
-    private: true, type: 'module', dependencies: { '@cfal/noise-ws': `file:${join(root, archive)}` },
+    private: true,
+    type: 'module',
+    dependencies: { '@cfal/noise-ws': `file:${join(root, archive)}` },
     devDependencies: { '@types/bun': '1.4.2', typescript: '6.0.3' },
   }));
   await cp(join(import.meta.dir, 'fixtures/smoke.ts'), join(consumer, 'smoke.ts'));
   await cp(join(import.meta.dir, 'fixtures/consumer.ts'), join(consumer, 'consumer.ts'));
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
-    compilerOptions: { target: 'ESNext', module: 'Preserve', moduleResolution: 'Bundler', types: ['bun'], strict: true, noEmit: true },
+    compilerOptions: {
+      target: 'ESNext',
+      module: 'Preserve',
+      moduleResolution: 'Bundler',
+      types: ['bun'],
+      strict: true,
+      noEmit: true,
+    },
     include: ['consumer.ts'],
   }));
   await run([process.execPath, 'install', '--ignore-scripts'], consumer);
@@ -49,4 +60,6 @@ try {
   await rm(join(root, archive));
   await run([binary], runtime);
   console.log(`Packaged declarations, source and standalone client/server passed (Bun ${Bun.version}, ${process.platform}-${process.arch}).`);
-} finally { await rm(root, { recursive: true, force: true }); }
+} finally {
+  await rm(root, { recursive: true, force: true });
+}
