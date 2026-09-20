@@ -175,7 +175,9 @@ client-side scheduling. Retain application data until your own receipt arrives.
 
 The server callback adapter supplies `open`, `message`, and `close`, plus safe
 dedicated-listener settings. `upgrade()` returns `undefined` on successful
-upgrade, HTTP 400 on failure, or HTTP 503 on admission refusal. `noise.close()`
+upgrade, HTTP 400 on failure, or HTTP 503 on admission refusal. Invalid connection
+options throw `TypeError` before admitting the connection; validate configuration
+at startup or catch these errors in the host's `fetch` handler. `noise.close()`
 closes its connections and refuses future upgrades, but does not stop the host
 HTTP server. `noise.size` counts its pending and established connections.
 
@@ -193,9 +195,11 @@ evidence that the peer consumed or persisted application data. A raw transport
 close is reported as unauthenticated, even with WebSocket status 1000.
 
 Client options additionally accept an `AbortSignal`. Cancellation closes the
-physical connection and settles both lifecycle promises. Errors and closure are
-reported at most once. The library never logs message/key material or echoes
-native failure strings or peer-supplied WebSocket close reasons.
+physical connection and settles both lifecycle promises. Local `close()` before
+readiness (including `noise.close()` on pending handshakes), or cancellation via
+`AbortSignal` at any stage, reports `CLOSED` through `onError` and `closed.error`.
+Errors and closure are reported at most once. The library never logs message/key
+material or echoes native failure strings or peer-supplied WebSocket close reasons.
 
 ## Limits
 
