@@ -20,7 +20,7 @@ async function run(command: string[], cwd: string): Promise<void> {
 }
 
 try {
-  await run([process.execPath, 'pm', 'pack', '--destination', root], repository);
+  await run([process.execPath, 'pm', 'pack', '--ignore-scripts', '--destination', root], repository);
   const archive = (await readdir(root)).find((name) => name.endsWith('.tgz'));
   if (!archive) throw new Error('Package archive was not produced');
   const consumer = join(root, 'consumer');

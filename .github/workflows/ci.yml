@@ -16,8 +16,11 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check
-      - run: bun run build
-      - run: git diff --exit-code -- types
+      - name: Check declaration freshness
+        run: |
+          rm -r types
+          bun run build
+          test -z "$(git status --porcelain --untracked-files=all -- types)"
       - run: bun run test
       - run: bun run test:compile
       - uses: actions/setup-go@v5
