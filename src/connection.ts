@@ -59,14 +59,18 @@ export class NoiseConnection implements NoiseWebSocket {
 
   send(message: string | Uint8Array): void {
     if (this.#status !== 'open') throw new NoiseError('NOT_OPEN');
-    if (typeof message !== 'string' && !(message instanceof Uint8Array)) throw new TypeError('Messages must be strings or Uint8Arrays');
+    if (typeof message !== 'string' && !(message instanceof Uint8Array)) {
+      throw new TypeError('Messages must be strings or Uint8Arrays');
+    }
     const length = typeof message === 'string' ? Buffer.byteLength(message) : message.byteLength;
     if (length > this.#limits.maxMessageBytes) throw new NoiseError('MESSAGE_TOO_LARGE');
     if (this.bufferedAmount + encodedBytes(length) > this.#limits.maxBufferedBytes) throw new NoiseError('BACKPRESSURE');
     try {
       if (recordCount(length) > this.#crypto.sendRemaining) throw new NoiseError('RECORD_LIMIT');
       const payload = Buffer.from(message);
-      for (const record of messageRecords(payload, typeof message === 'string')) this.#write(this.#crypto.encrypt(record));
+      for (const record of messageRecords(payload, typeof message === 'string')) {
+        this.#write(this.#crypto.encrypt(record));
+      }
     } catch (error) {
       const failure = error instanceof NoiseError ? error : new NoiseError('TRANSPORT_ERROR');
       this.#finish(false, failure);
@@ -76,21 +80,38 @@ export class NoiseConnection implements NoiseWebSocket {
 
   close(): void {
     if (this.#status === 'closed') return;
-    if (this.#status !== 'open') { this.#finish(false, new NoiseError('CLOSED')); return; }
-    try { this.#write(this.#crypto.encrypt(Buffer.from([CLOSE]))); }
-    catch (error) { this.#finish(false, error instanceof NoiseError ? error : new NoiseError('TRANSPORT_ERROR')); return; }
+    if (this.#status !== 'open') {
+      this.#finish(false, new NoiseError('CLOSED'));
+      return;
+    }
+    try {
+      this.#write(this.#crypto.encrypt(Buffer.from([CLOSE])));
+    } catch (error) {
+      this.#finish(false, error instanceof NoiseError ? error : new NoiseError('TRANSPORT_ERROR'));
+      return;
+    }
     this.#finish(false, null);
   }
 
   /** Adapter lifecycle: invoked exactly once after the physical WebSocket opens. */
   attach(transport: NoiseTransport): void {
-    if (this.#status === 'closed') { transport.abort(); return; }
-    if (this.#transport) { transport.abort(); this.fail('PROTOCOL_ERROR'); return; }
+    if (this.#status === 'closed') {
+      transport.abort();
+      return;
+    }
+    if (this.#transport) {
+      transport.abort();
+      this.fail('PROTOCOL_ERROR');
+      return;
+    }
     this.#transport = transport;
     this.#status = 'handshaking';
     if (this.#initiator) {
-      try { this.#write(this.#crypto.sendHandshake()); }
-      catch { this.fail('TRANSPORT_ERROR'); }
+      try {
+        this.#write(this.#crypto.sendHandshake());
+      } catch {
+        this.fail('TRANSPORT_ERROR');
+      }
     }
   }
 
@@ -98,33 +119,49 @@ export class NoiseConnection implements NoiseWebSocket {
   receive(frame: unknown): void {
     if (this.#status === 'closed') return;
     try {
-      if (!(frame instanceof ArrayBuffer) && !(frame instanceof Uint8Array)) throw new NoiseError('PROTOCOL_ERROR');
-      const bytes = frame instanceof ArrayBuffer ? Buffer.from(frame) : Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength);
+      if (!(frame instanceof ArrayBuffer) && !(frame instanceof Uint8Array)) {
+        throw new NoiseError('PROTOCOL_ERROR');
+      }
+      const bytes = frame instanceof ArrayBuffer
+        ? Buffer.from(frame)
+        : Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength);
       if (bytes.length > MAX_FRAME_BYTES || bytes.length < 17) throw new NoiseError('PROTOCOL_ERROR');
+
       if (this.#status === 'handshaking') {
         if (bytes.length !== 48) throw new NoiseError('PROTOCOL_ERROR');
         this.#crypto.receiveHandshake(bytes);
         this.#status = 'confirming';
-        if (this.#initiator) this.#write(this.#crypto.encrypt(Buffer.from([CLIENT_READY])));
-        else this.#write(this.#crypto.sendHandshake());
+        if (this.#initiator) {
+          this.#write(this.#crypto.encrypt(Buffer.from([CLIENT_READY])));
+        } else {
+          this.#write(this.#crypto.sendHandshake());
+        }
         return;
       }
+
       const record = this.#crypto.decrypt(bytes);
       if (this.#status === 'confirming') {
-        if (record.length !== 1 || record[0] !== (this.#initiator ? SERVER_READY : CLIENT_READY)) throw new NoiseError('PROTOCOL_ERROR');
-        if (!this.#initiator) this.#write(this.#crypto.encrypt(Buffer.from([SERVER_READY])));
+        const expectedConfirmation = this.#initiator ? SERVER_READY : CLIENT_READY;
+        if (record.length !== 1 || record[0] !== expectedConfirmation) {
+          throw new NoiseError('PROTOCOL_ERROR');
+        }
+        if (!this.#initiator) {
+          this.#write(this.#crypto.encrypt(Buffer.from([SERVER_READY])));
+        }
         this.#status = 'open';
         clearTimeout(this.#handshakeTimer);
         this.#ready.resolve();
         this.#invoke(() => this.#options.onOpen?.(this));
         return;
       }
+
       if (this.#status !== 'open') throw new NoiseError('PROTOCOL_ERROR');
       if (record[0] === CLOSE) {
         if (record.length !== 1 || this.#assembler.active) throw new NoiseError('PROTOCOL_ERROR');
         this.#finish(true, null);
         return;
       }
+
       const message = this.#assembler.receive(record, this.#limits.maxMessageBytes);
       if (message !== null) {
         if (this.#messageTimer) clearTimeout(this.#messageTimer);
@@ -145,8 +182,11 @@ export class NoiseConnection implements NoiseWebSocket {
   #write(frame: Buffer): void {
     if (this.#status === 'closed' || !this.#transport) throw new NoiseError('CLOSED');
     if (this.bufferedAmount + frame.length + 14 > this.#limits.maxBufferedBytes) throw new NoiseError('BACKPRESSURE');
-    try { this.#transport.write(frame); }
-    catch { throw new NoiseError('TRANSPORT_ERROR'); }
+    try {
+      this.#transport.write(frame);
+    } catch {
+      throw new NoiseError('TRANSPORT_ERROR');
+    }
   }
 
   #invoke(callback: () => unknown): void {
@@ -156,7 +196,9 @@ export class NoiseConnection implements NoiseWebSocket {
       if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
         void Promise.resolve(result).catch(() => this.fail('HANDLER_ERROR'));
       }
-    } catch { this.fail('HANDLER_ERROR'); }
+    } catch {
+      this.fail('HANDLER_ERROR');
+    }
   }
 
   #finish(authenticated: boolean, error: NoiseError | null): void {
@@ -171,9 +213,14 @@ export class NoiseConnection implements NoiseWebSocket {
     const info = { authenticated, error };
     this.#closed.resolve(info);
     try {
-      if (error) this.#transport?.abort();
-      else this.#transport?.close();
-    } catch { /* Transport teardown cannot prevent key cleanup or settlement. */ }
+      if (error) {
+        this.#transport?.abort();
+      } else {
+        this.#transport?.close();
+      }
+    } catch {
+      // Transport teardown cannot prevent key cleanup or settlement.
+    }
     this.#transport = null;
     this.#onFinish();
     if (error) this.#invoke(() => this.#options.onError?.(this, error));

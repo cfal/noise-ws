@@ -17,8 +17,14 @@ function hash(...parts: Buffer[]): Buffer {
 function derive(chainingKey: Buffer, input: Buffer, outputs: 2 | 3): Buffer[] {
   // Noise HKDF uses the chaining key as salt and empty info (Noise section 4.3).
   const material = Buffer.from(hkdfSync('sha256', input, chainingKey, EMPTY, outputs * 32));
-  try { return Array.from({ length: outputs }, (_, index) => Buffer.from(material.subarray(index * 32, (index + 1) * 32))); }
-  finally { material.fill(0); }
+  try {
+    return Array.from({ length: outputs }, (_, index) => {
+      const offset = index * 32;
+      return Buffer.from(material.subarray(offset, offset + 32));
+    });
+  } finally {
+    material.fill(0);
+  }
 }
 
 /** Fixed NNpsk0 only: -> psk,e; <- e,ee. No pattern interpreter or negotiation. */
@@ -40,7 +46,9 @@ export class NoiseHandshake {
     this.#ephemeral = ephemeral ?? generateKeyPairSync('x25519').privateKey;
     const key = Buffer.from(psk);
     try {
-      if (this.#ephemeral.type !== 'private' || this.#ephemeral.asymmetricKeyType !== 'x25519') throw new NoiseError('PROTOCOL_ERROR');
+      if (this.#ephemeral.type !== 'private' || this.#ephemeral.asymmetricKeyType !== 'x25519') {
+        throw new NoiseError('PROTOCOL_ERROR');
+      }
       this.#mixHash(prologue);
       const [chainingKey, tempHash, cipherKey] = derive(this.#chainingKey, key, 3);
       this.#chainingKey.fill(0);
@@ -48,8 +56,11 @@ export class NoiseHandshake {
       this.#mixHash(tempHash!);
       tempHash!.fill(0);
       this.#replaceCipher(cipherKey!);
-    } catch (error) { this.#fail(error); }
-    finally { key.fill(0); }
+    } catch (error) {
+      this.#fail(error);
+    } finally {
+      key.fill(0);
+    }
   }
 
   get complete(): boolean { return this.#phase === 'complete'; }
@@ -58,45 +69,57 @@ export class NoiseHandshake {
     try {
       if (this.#phase !== 'write-first' && this.#phase !== 'write-second') throw new NoiseError('PROTOCOL_ERROR');
       if (payload.length > MAX_FRAME_BYTES - 48) throw new NoiseError('MESSAGE_TOO_LARGE');
-      const first = this.#phase === 'write-first';
+      const isFirstMessage = this.#phase === 'write-first';
       const encoded = createPublicKey(this.#ephemeral!).export({ format: 'der', type: 'spki' });
-      if (encoded.length !== 44 || !encoded.subarray(0, 12).equals(X25519_SPKI)) throw new NoiseError('PROTOCOL_ERROR');
+      if (encoded.length !== 44 || !encoded.subarray(0, 12).equals(X25519_SPKI)) {
+        throw new NoiseError('PROTOCOL_ERROR');
+      }
       const ephemeral = encoded.subarray(12);
       this.#mixHash(ephemeral);
       this.#mixKey(ephemeral); // The e token also mixes a key in every PSK pattern.
-      if (!first) this.#mixDH();
+      if (!isFirstMessage) this.#mixDH();
       const encrypted = this.#cipher!.encrypt(payload, this.#hash);
       this.#mixHash(encrypted);
-      this.#phase = first ? 'read-second' : 'complete';
+      this.#phase = isFirstMessage ? 'read-second' : 'complete';
       return Buffer.concat([ephemeral, encrypted]);
-    } catch (error) { return this.#fail(error); }
+    } catch (error) {
+      return this.#fail(error);
+    }
   }
 
   read(message: Buffer): Buffer {
     try {
       if (this.#phase !== 'read-first' && this.#phase !== 'read-second') throw new NoiseError('PROTOCOL_ERROR');
       if (message.length < 48 || message.length > MAX_FRAME_BYTES) throw new NoiseError('PROTOCOL_ERROR');
-      const first = this.#phase === 'read-first';
+      const isFirstMessage = this.#phase === 'read-first';
       this.#remote = Buffer.from(message.subarray(0, 32));
       this.#mixHash(this.#remote);
       this.#mixKey(this.#remote);
-      if (!first) this.#mixDH();
+      if (!isFirstMessage) this.#mixDH();
       const ciphertext = message.subarray(32);
       const payload = this.#cipher!.decrypt(ciphertext, this.#hash);
       this.#mixHash(ciphertext);
-      this.#phase = first ? 'write-second' : 'complete';
+      this.#phase = isFirstMessage ? 'write-second' : 'complete';
       return payload;
-    } catch (error) { return this.#fail(error); }
+    } catch (error) {
+      return this.#fail(error);
+    }
   }
 
   finish(): { tx: Buffer; rx: Buffer; hash: Buffer } {
     try {
       if (!this.complete) throw new NoiseError('PROTOCOL_ERROR');
-      const [first, second] = derive(this.#chainingKey, EMPTY, 2);
-      const result = { tx: (this.initiator ? first : second)!, rx: (this.initiator ? second : first)!, hash: Buffer.from(this.#hash) };
+      const [initiatorSendKey, responderSendKey] = derive(this.#chainingKey, EMPTY, 2);
+      const result = {
+        tx: (this.initiator ? initiatorSendKey : responderSendKey)!,
+        rx: (this.initiator ? responderSendKey : initiatorSendKey)!,
+        hash: Buffer.from(this.#hash),
+      };
       this.destroy();
       return result;
-    } catch (error) { return this.#fail(error); }
+    } catch (error) {
+      return this.#fail(error);
+    }
   }
 
   destroy(): void {
@@ -124,17 +147,26 @@ export class NoiseHandshake {
 
   #replaceCipher(key: Buffer): void {
     this.#cipher?.destroy();
-    try { this.#cipher = new NoiseCipher(key); }
-    finally { key.fill(0); }
+    try {
+      this.#cipher = new NoiseCipher(key);
+    } finally {
+      key.fill(0);
+    }
   }
 
   #mixDH(): void {
-    const publicKey = createPublicKey({ key: Buffer.concat([X25519_SPKI, this.#remote!]), format: 'der', type: 'spki' });
+    const publicKey = createPublicKey({
+      key: Buffer.concat([X25519_SPKI, this.#remote!]),
+      format: 'der',
+      type: 'spki',
+    });
     const shared = diffieHellman({ privateKey: this.#ephemeral!, publicKey });
     try {
       if (shared.equals(Buffer.alloc(32))) throw new NoiseError('AUTHENTICATION_FAILED');
       this.#mixKey(shared);
-    } finally { shared.fill(0); }
+    } finally {
+      shared.fill(0);
+    }
   }
 
   #fail(error: unknown): never {

@@ -53,7 +53,10 @@ export class NoiseCipher {
     }
   }
 
-  destroy(): void { this.#key?.fill(0); this.#key = null; }
+  destroy(): void {
+    this.#key?.fill(0);
+    this.#key = null;
+  }
 
   #nonce(): Buffer {
     if (!this.#key) throw new NoiseError('CLOSED');

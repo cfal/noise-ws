@@ -45,31 +45,40 @@ export class MessageAssembler {
   get active(): boolean { return this.#active; }
 
   receive(record: Buffer, maxBytes: number): string | Uint8Array | null {
-    const start = record[0] === TEXT || record[0] === BINARY;
-    if (start) {
+    const isFirstRecord = record[0] === TEXT || record[0] === BINARY;
+    if (isFirstRecord) {
       if (this.#active || record.length < 5) throw new NoiseError('PROTOCOL_ERROR');
       this.#total = record.readUInt32BE(1);
       if (this.#total > maxBytes) throw new NoiseError('MESSAGE_TOO_LARGE');
       this.#text = record[0] === TEXT;
       this.#active = true;
-    } else if (record[0] !== CONTINUE || !this.#active) throw new NoiseError('PROTOCOL_ERROR');
-    const chunk = record.subarray(start ? 5 : 1);
-    const expected = Math.min(this.#total - this.#received, start ? FIRST_PAYLOAD_BYTES : NEXT_PAYLOAD_BYTES);
-    if (chunk.length !== expected) throw new NoiseError('PROTOCOL_ERROR');
+    } else if (record[0] !== CONTINUE || !this.#active) {
+      throw new NoiseError('PROTOCOL_ERROR');
+    }
+
+    const chunk = record.subarray(isFirstRecord ? 5 : 1);
+    const payloadCapacity = isFirstRecord ? FIRST_PAYLOAD_BYTES : NEXT_PAYLOAD_BYTES;
+    const expectedBytes = Math.min(this.#total - this.#received, payloadCapacity);
+    if (chunk.length !== expectedBytes) throw new NoiseError('PROTOCOL_ERROR');
     this.#chunks.push(chunk);
     this.#received += chunk.length;
     if (this.#received !== this.#total) return null;
+
     const payload = Buffer.concat(this.#chunks, this.#total);
     const text = this.#text;
     this.clear();
     if (!text) return payload;
-    try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(payload); }
-    catch { throw new NoiseError('PROTOCOL_ERROR'); }
+    try {
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(payload);
+    } catch {
+      throw new NoiseError('PROTOCOL_ERROR');
+    }
   }
 
   clear(): void {
     this.#chunks = [];
-    this.#received = this.#total = 0;
+    this.#total = 0;
+    this.#received = 0;
     this.#active = false;
   }
 }
