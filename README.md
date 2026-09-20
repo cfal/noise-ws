@@ -140,7 +140,9 @@ connectNoiseWebSocket('wss://node.internal/noise', {
 });
 ```
 
-`tls.serverName` can explicitly set the TLS server name. Setting
+The certificate must name the URL host in a DNS or IP subject alternative name
+(SAN). Bun's WebSocket client ignores `tls.serverName`, so hostname overrides are
+not supported. Setting
 `allowUnverifiedTls: true` disables **outer TLS** certificate verification; it
 never disables Noise authentication or permits plaintext fallback. Prefer
 verified TLS for defense in depth and protection of HTTP/upgrade metadata.

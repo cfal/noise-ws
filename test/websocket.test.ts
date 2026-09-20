@@ -104,21 +104,26 @@ test('abort, already-aborted signals and refusal settle both promises', async ()
   await deadline(refused.closed);
 });
 
-test('TLS verifies by default; trusted CA or explicit unverified TLS still requires the correct PSK', async () => {
+test.each(['localhost', '127.0.0.1'])('TLS verifies the URL host %s; trusted CA or unverified TLS still requires the correct PSK', async (host) => {
   await mkdir(join(homedir(), 'tmp'), { recursive: true });
   const root = await mkdtemp(join(homedir(), 'tmp/noise-ws-tls-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const subjectAlternativeName = host === 'localhost' ? `DNS:${host}` : `IP:${host}`;
   const proc = Bun.spawn(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes',
-    '-keyout', join(root, 'key.pem'), '-out', join(root, 'cert.pem'), '-days', '1', '-subj', '/CN=localhost',
-    '-addext', 'subjectAltName=DNS:localhost'], { stdout: 'ignore', stderr: 'pipe' });
+    '-keyout', join(root, 'key.pem'), '-out', join(root, 'cert.pem'), '-days', '1', '-subj', `/CN=${host}`,
+    '-addext', `subjectAltName=${subjectAlternativeName}`], { stdout: 'ignore', stderr: 'pipe' });
   const stderr = new Response(proc.stderr).text();
   if (await proc.exited !== 0) throw new Error(await stderr);
   await stderr;
   const cert = Bun.file(join(root, 'cert.pem'));
-  const { url } = fixture({}, { cert, key: Bun.file(join(root, 'key.pem')) });
+  const { url: fixtureUrl } = fixture({}, { cert, key: Bun.file(join(root, 'key.pem')) });
+  const url = new URL(fixtureUrl);
+  url.hostname = host;
   const untrusted = connectNoiseWebSocket(url, { psk, context, onMessage() {} });
   await expect(deadline(untrusted.ready)).rejects.toBeDefined();
-  const wrongHost = connectNoiseWebSocket(url.replace('localhost', '127.0.0.1'), { psk, context, tls: { ca: cert }, onMessage() {} });
+  const wrongUrl = new URL(url);
+  wrongUrl.hostname = host === 'localhost' ? '127.0.0.1' : 'localhost';
+  const wrongHost = connectNoiseWebSocket(wrongUrl, { psk, context, tls: { ca: cert }, onMessage() {} });
   await expect(deadline(wrongHost.ready)).rejects.toBeDefined();
   for (const options of [{ tls: { ca: cert } }, { allowUnverifiedTls: true }]) {
     const socket = connectNoiseWebSocket(url, { psk, context, onMessage() {}, ...options });
