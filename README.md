@@ -140,11 +140,14 @@ connectNoiseWebSocket('wss://node.internal/noise', {
 });
 ```
 
-The certificate must name the URL host in a DNS or IP subject alternative name
-(SAN). Bun's WebSocket client ignores `tls.serverName`, so hostname overrides are
-not supported. Setting
-`allowUnverifiedTls: true` disables **outer TLS** certificate verification; it
-never disables Noise authentication or permits plaintext fallback. Prefer
+Use a DNS name or IPv4 address for verified `wss:` connections, with a matching
+DNS or IP subject alternative name (SAN). Bun 1.4.2 fails verification for
+IPv6-literal URL hosts even with a matching IP SAN; use a DNS name for IPv6
+endpoints. Its WebSocket client also ignores `tls.serverName`, so hostname
+overrides are not supported.
+
+Setting `allowUnverifiedTls: true` disables **outer TLS** certificate verification;
+it never disables Noise authentication or permits plaintext fallback. Prefer
 verified TLS for defense in depth and protection of HTTP/upgrade metadata.
 Certificate fingerprint pinning is not implemented; see
 [Bun issue #43635](https://github.com/oven-sh/bun/issues/43635).
